@@ -105,10 +105,11 @@ struct RunTimers {
 
 impl Stage for RunTimers {
     fn initialize(&mut self, world: &mut World, resources: &mut Resources) {
-        let timers = resources.get_mut::<Timers>().unwrap().tick();
-        for mut timer in timers {
+        let mut timers = resources.get_mut::<Timers>().unwrap().tick();
+        for timer in &mut timers {
             timer.initialize(world, resources);
         }
+        self.curr_timers = timers;
     }
 
     fn run(&mut self, world: &mut World, resources: &mut Resources) {
