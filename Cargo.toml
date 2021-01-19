@@ -1,10 +1,10 @@
 [package]
-name = "bevy-timers"
+name = "bevy-tick-timers"
 version = "0.1.0"
-authors = ["map"]
+authors = ["Matthew Plant <map@maplant.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT/Apache-2.0"
 
 [dependencies]
 bevy = "0.4"

@@ -8,4 +8,4 @@ edition = "2018"
 
 [dependencies]
 bevy = "0.4"
-bevy-timers = { path = ".." }
+bevy-tick-timers = { path = ".." }

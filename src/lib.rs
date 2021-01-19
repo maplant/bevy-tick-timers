@@ -54,11 +54,11 @@ pub struct Timers {
 
 impl Timers {
     /// Schedule a timer to occur after the given number of ticks have elapsed. 
-    pub fn schedule<S>(&mut self, after: usize, timer: S)
+    pub fn after<S>(&mut self, after: usize, timer: S)
     where
-        S: Stage
+        S: System<In = (), Out = ()>
     {
-        let timer = Box::new(timer);
+        let timer = Box::new(SystemStage::from(timer));
         let level = if after == 0 {
             0
         } else {
@@ -73,7 +73,15 @@ impl Timers {
         }
     }
 
-    pub fn tick(&mut self) -> Vec<Box<dyn Stage>> {
+    /// Schedule a timer to occur right now.
+    pub fn now<S>(&mut self, timer: S)
+    where
+        S: System<In = (), Out = ()>
+    {
+        self.after(0, timer);
+    }
+
+    fn tick(&mut self) -> Vec<Box<dyn Stage>> {
         // Surely there is a better way to do this.
         let mut timers = Vec::<Box<dyn Stage>>::new();
         if self.level_0.current_tick == 63 {
