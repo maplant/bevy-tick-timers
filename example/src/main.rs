@@ -18,4 +18,3 @@ fn main() {
         .add_startup_system(add_timer.system())
         .run();
 }
-

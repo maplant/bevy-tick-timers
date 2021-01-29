@@ -3,8 +3,13 @@ name = "bevy-tick-timers"
 version = "0.1.0"
 authors = ["Matthew Plant <map@maplant.com>"]
 edition = "2018"
-
 license = "MIT/Apache-2.0"
+
+documentation = "https://docs.rs/crate/bevy_tick_timers"
+homepage = "https://github.com/maplant/bevy-tick-timers"
+repository = "https://github.com/maplant/bevy-tick-timers"
+readme = "README.md"
+keywords = [ "bevy", "game", "engine", "gamedev" ]
 
 [dependencies]
 bevy = "0.4"
