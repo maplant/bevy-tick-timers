@@ -8,8 +8,8 @@
 //!
 //! # Example:
 //!```no_run
-//!#use bevy::prelude::*;
-//!#use bevy_tick_timers::{TimerPlugin, Timers};
+//!use bevy::prelude::*;
+//!use bevy_tick_timers::{TimerPlugin, Timers};
 //!
 //!fn add_timer(
 //!    mut timers: ResMut<Timers>,
@@ -73,6 +73,7 @@ impl TimingWheel {
     }
 }
 
+/// A Bevy resource that allows for the scheduling of tick based timers. 
 #[derive(Default)]
 pub struct Timers {
     /// One frame at 120 fps.
@@ -151,6 +152,8 @@ impl Stage for RunTimers {
     }
 }
 
+/// A Bevy plugin that adds the [Timers] resource and a scheduler to execute timers each
+/// game update.
 pub struct TimerPlugin;
 
 impl Plugin for TimerPlugin {
