@@ -3,8 +3,8 @@
 //! Tick based timers are timers that operate not on real time, but on the number of state updates
 //! that occur. Each state update constitutes a "tick".
 //!
-//! For any timer that only runs during a game session, a tick based timer is preferred. This makes
-//! games more consistent and replayable (which also means they are easier to debug).
+//! For any timer that does not update outside of a game session, a tick based timer is preferred. 
+//! This makes games more consistent and replayable (which also means they are easier to debug).
 //!
 //! # Example:
 //!```no_run

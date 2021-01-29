@@ -5,7 +5,7 @@ Provides a [Bevy](https://bevyengine.org/) plugin for scheduling and managing ti
 Tick based timers are timers that operate not on real time, but on the number of state updates
 that occur. Each state update constitutes a "tick".
 
-For any timer that only runs during a game session, a tick based timer is preferred. This makes
+For any timer that does not update during game session, a tick based timer is preferred. This makes
 games more consistent and replayable (which also means they are easier to debug).
 
 # Example: 
