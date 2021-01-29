@@ -1,0 +1,415 @@
+#+title: An Alternative Timer-Based Approach to Game Engine Scheduling In Bevy
+#+author: Matthew Plant
+
+In this article we will be discussing an alternative approach to Bevy's Schedule system that uses timers to encapsulate
+and schedule game logic, and how this system can be implemented on top of Bevy without any changes.
+
+* Background
+
+The question of how to implement sequential processes in game engines has a long and storied history. The most 
+basic approach is to use a step function that contains all of the game logic. A typical step function might look 
+as follows: 
+
+#+begin_src rust
+struct World { /* ... */ }
+
+impl World {
+    pub fn step(&mut self) {
+        collect_input(self);
+        update_positions(self);
+        resolve_collisions(self);
+        other_logic(self);
+    }
+}
+#+end_src
+
+Effectively, this is how Bevy works. It has a Schedule structure that contains an ordered list of "stages" which 
+are executed one after another. Running all of the stages once completes a "step":
+
+#+begin_src rust
+pub struct Schedule {
+    stages: HashMap<String, Box<dyn Stage>>,
+    stage_order: Vec<String>,
+    /* ... */
+}
+
+impl Schedule {
+    pub fn run_once(&mut self, world: &mut World, resources: &mut Resources) {
+        for name in self.stage_order.iter() {
+            let stage = self.stages.get_mut(name).unwrap();
+            stage.run(world, resources);
+        }
+    }
+}
+#+end_src
+
+This is a perfectly acceptable method for structuring games. However, when adding the element of time, this structure
+becomes less than elegant. Let's consider what Bevy recommends doing if we would like to have a process run every two
+seconds:
+
+#+begin_src rust
+struct GreetTimer(Timer);
+
+fn greet_people(
+    time: Res<Time>, mut timer: ResMut<GreetTimer>, query: Query<&Name, With<Person>>
+) {
+    // update our timer with the time elapsed since the last update
+    // if the timer hasn't finished yet, we return
+    if !timer.0.tick(time.delta_seconds()).just_finished() {
+        return;
+    }
+
+    for name in query.iter() {
+        println!("hello {}!", name.0);
+    }
+}
+
+impl Plugin for HelloPlugin {
+    fn build(&self, app: &mut AppBuilder) {
+        // the reason we call from_seconds with the true flag is to make the timer repeat itself
+        app.add_resource(GreetTimer(Timer::from_seconds(2.0, true)))
+           .add_startup_system(add_people.system())
+           .add_system(greet_people.system());
+    }
+}
+#+end_src
+
+A few issues stand out here in this approach:
+
+- The timer is not automatically tracked by Bevy, requiring the greet_people system to tick the timer 
+  every entry. 
+- As a consequence of the previous point, the greet_people function will be entered even if the timer
+  has not elapsed, which is not as efficient as we would like. 
+- The timer is based on real-time, which means that it can be off by some amount of time.
+- Timers are resources and thus extracted by type, which means we have to strategically couple them if we want more
+  complicated behavior. This point is addressed in the next section.
+
+* Case Study Part One: Grenades in Bevy
+
+A grenade (in a video game) is an item which after a set amount of time performs an action and despawns itself. 
+Let's analyze how we would implement this currently in Bevy.
+
+Our grenade needs to be able to despawn an entity in our ECS after a set amount of time, so therefore it is composed
+of a Timer and Entity id:
+
+#+begin_src rust
+struct Grenade {
+    timer: Timer,
+    entity: Entity,
+}
+#+end_src
+
+In order to efficiently dispose of our Grenade's timer and entity id after the timer has elapsed, we need to store
+them in a data structure that allows for fast removal of any item. Therefore, the simplest effective data structure 
+to make our "Grenades" resource is a linked list:
+
+#+begin_src rust 
+struct Grenades(LinkedList<Grenade>);
+#+end_src
+
+There are ways to make this more efficient, such as structuring the linked list such that the first entry is the timer
+that is next to run, and all subsequent timers refer to how much time after the first has run. However, and this is the
+fundamental point of this article, *the problem of efficiently designing this data structure is the exact same as 
+efficiently designing a scheduler for arbitrary timers.* Therefore, let us continue with this example. 
+
+Our system for exploding the grenades is as follows:
+
+#+begin_src rust
+fn explode_grenades(
+    commands: &mut Commands,
+    time: Res<Time>,
+    mut grenades: ResMut<Grenades>,
+) {
+    let elapsed = time.delta_seconds();
+    let mut curr = grenades.0.cursor_front_mut();
+    loop {
+        let exploding = if let Some(ref mut curr) = curr.current() {
+            if curr.timer.tick(elapsed).just_finished() {
+                true
+            } else {
+                false
+            }
+        } else {
+            // No more items left in the list. 
+            return;
+        };
+        if exploding {
+            let Grenade { entity, .. } = curr.remove_current().unwrap();
+            // Curr now points to the next entry.
+            // Despawn the entity and perform whatever other action is required.
+            commands.despawn(entity);
+        } else {
+            curr.move_next();
+        }
+    }
+}
+#+end_src
+
+This is quite a bit of code for an implementation that is not very efficient, and as noted above this is basically 
+because we are implementing an ad-hoc system scheduler. More efficient designs for these are much more involved. This
+leads us to the question: how can we design a system to efficiently handle any type of timer?
+
+* Primer for Understanding Game-Time versus Real-Time
+
+In a game engine, the most basic unit of time is a single discrete update to the game state, known commonly as a tick. 
+Ticks are related to real-time in some ratio, some common ratios being 60 to 1 second or 120 to 1 second. Other common
+tick rates are 64 to 1 second or 128 to 1 second. 
+
+You will notice that these numbers do not match up necessarily with common refresh rates of monitors, which are usually 
+60 or 144 hertz. The number of refreshes to the display the game engine does is called the frames per second, or more 
+commonly known as the FPS. The FPS is often times equal to the tick rate, but as we will explain later this can often
+be detrimental. 
+
+It is important that games have a consistent tick rate during a single game session and that units of time in game 
+are expressed in terms of ticks and not real-time. Because tick rates are ratios to real-time, it is possible to 
+express any real-time value as a number of ticks, and vice versa. However, when real-time values are used as timer 
+values instead of tick values, inconsistencies in clocks can lead to the same real-time values varying by some number 
+of ticks. 
+
+This might not seem like much of an issue, and for a lot of video games it can be argued that it is not. However, for 
+competitive games this effect can be devastating. It is fundamentally important to eliminate variables that a player 
+cannot influence unless these variables are explicitly random. For example, Street Fighter would be far less competitive
+of a game if hitboxes lingered for a random number of frames. It might not ruin the competitive aspect of the game 
+but it would be an incredible source of frustration for players. 
+
+As another example of the importance of basing timers in game-time and not real-time, consider what happens if a tick
+lasts much longer than it is expected to, such as from network lag. Now any timer based on real-time no longer relates
+to ticks, and network lag can affect the game logic. 
+
+Basing game logic on ticks also allows for games to be reproducible. Recording the input given at each tick effectively
+creates a replay that allows us to recreate game state at any time. This is incredibly important for many competitive
+games on a wide spectrum of game play, from Street Fighter to Counter Strike. 
+
+It might not seem like this is an issue for single player games, however I would argue it's just as important for two 
+reasons. First, allowing for replays to be captured makes it much easier to debug your game during development. 
+Secondly, even single player games can be competitive, with speed running becoming more and more popular it behooves
+you to make your game as consistent and reproducible as possible. Your speedrunners will thank you. 
+
+There are plenty of times in which real-time effects are desirable and therefore real-time timers are useful, such as 
+effects in single player games that are determined by a real amount of time and not an amount of time spent during a 
+game session. For everything else, tick based timers should be used. 
+
+* A Timer-Based Approach for Scheduling 
+
+We redefine a Timer to be a Bevy Stage that is executed after a certain amount of time and is discarded. 
+Notice that the Timer includes a mutable reference to a TimingWheelHierarchy instead of just the world. 
+We will get into that later.
+
+#+begin_src rust 
+/// An object that runs once, modifies the world, and then is destroyed. 
+pub trait Timer: Any {
+    fn wakeup(
+        self: Box<Self>, 
+        schedule: &mut TimingWheelHierarchy, 
+        world: &mut World,
+        resources: &mut Resources
+    );
+}
+#+end_src
+
+** Implementing an efficient data structure for executing timers
+
+One of the most efficient data structures for executing timer is called a hierarchical timing wheel (insert reference here).
+An implementation of this with respect to our timer implementation is provided here. This implementation uses const
+generics, however it can be implemented just as easily with a fixed constant.  
+
+Keep in mind that there are almost certainly better ways to implement this.
+
+#+begin_src rust
+struct TimingWheel<const MAX_INTERVAL: usize> {
+    current_tick: usize,
+    ring:         [Vec<Box<dyn Timer>>; MAX_INTERVAL],
+}
+
+impl<const MAX_INTERVAL: usize> Default for TimingWheel<{ MAX_INTERVAL }> {
+    fn default() -> Self {
+        let mut empty = MaybeUninit::<[Vec<_>; MAX_INTERVAL]>::uninit();
+        let p: *mut Vec<Box<dyn Timer<World>>> = unsafe { mem::transmute(&mut empty) };
+        for i in 0..MAX_INTERVAL {
+            unsafe {
+                p.add(i).write(vec![]);
+            }
+        }
+        TimingWheel {
+            current_tick: 0,
+            ring:         unsafe { empty.assume_init() },
+        }
+    }
+}
+
+impl<const MAX_INTERVAL: usize> TimingWheel<{ MAX_INTERVAL }> {
+    /// Insert the timer into the wheel. 
+    fn schedule(&mut self, ticks: usize, timer: Box<dyn Timer>) {
+        let index = (self.current_tick + ticks) % MAX_INTERVAL;
+        self.ring[index].push(timer);
+    }
+
+    /// Return all the timers that execute on the current tick, and more the clock
+    /// forward one. 
+    fn tick(&mut self) -> Vec<Box<dyn Timer<World>>> {
+        let timers = mem::take(&mut self.ring[self.current_tick]);
+        self.current_tick = (self.current_tick + 1) % MAX_INTERVAL;
+        timers
+    }
+}
+
+#[derive(Default)]
+struct TimingWheelHierarchy {
+    /// One frame at 120 fps.
+    level_0: TimingWheel<64>,
+    level_1: TimingWheel<64>,
+    level_2: TimingWheel<64>,
+    level_3: TimingWheel<64>,
+    // TODO: Add more levels (if you want to). 
+}
+
+impl TimingWheel {
+    /// Schedule a timer to occur after the given number of ticks have elapsed. 
+    pub fn schedule(&mut self, ticks: usize, timer: Box<dyn Timer>) {
+        let level = if ticks == 0 {
+            0
+        } else {
+            (63 - ticks.leading_zeros()) / 6
+        };
+        match level {
+            0 => self.level_0.schedule(ticks, timer),
+            1 => self.level_1.schedule(ticks >> 6, timer),
+            2 => self.level_2.schedule(ticks >> 12, timer),
+            3 => self.level_3.schedule(ticks >> 18, timer),
+            _ => panic!("timer interval too long"),
+        }
+    }
+
+    pub fn tick(&mut self) -> Vec<Box<dyn Timer>> {
+        // Surely there is a better way to do this.
+        let mut timers = Vec::<Box<dyn Timer>>::new();
+        if self.level_0.current_tick == 63 {
+            if self.level_1.current_tick == 63 {
+                if self.level_2.current_tick == 63 {
+                    timers.extend(self.level_3.tick());
+                }
+                timers.extend(self.level_2.tick());
+            }
+            timers.extend(self.level_1.tick());
+        }
+        timers.extend(self.level_0.tick());
+        timers
+    }
+}
+#+end_src
+
+** Redefining Application
+
+With this new structure, we can redefine App in terms of timers. In this implementation we are omitting the Runner for
+the sake of brevity. 
+
+#+begin_src rust
+pub struct App {
+    pub world: World,
+    pub resources: Resources, 
+    pub schedule: TimingWheelHierarchy,
+}
+
+impl App {
+    /// Schedule a timer to be run after some number of ticks have elapsed.
+    pub fn schedule<T>(&mut self, after: usize, mut timer: T) -> &mut self
+    where
+        T: Timer + 'static,
+    {
+        self.schedule.schedule(after, Box::new(timer))
+        self
+    }
+
+    /// Schedule a timer to run immediately.
+    pub fn now<T>(&mut self, timer: T) -> &mut self 
+    where
+        T: Timer + 'static,
+    {
+        self.schedule.schedule(0, Box::new(timer));
+        self
+    }
+
+    /// Run the simulation forever.
+    pub fn run(&mut self) -> ! {
+          loop {
+              let timers = self.schedule.tick();
+              for mut timer in timers {
+                  timer.wakeup(
+                      &mut self.schedule, 
+                      &mut self.world,
+                      &mut self.resources
+                  );
+              }
+          }
+    }
+}
+#+end_src
+
+** Continuous timers, or timers that reschedule themselves. 
+
+Stages in Bevy run once every game tick. By passing the schedule to wakeup, we now have a way to replicate that 
+behavior with timers: a "pass" (or Bevy Stage) is a timer that reschedules itself upon wakeup:
+
+#+begin_src rust
+pub trait Pass {
+    // Default to 1 to run every tick.
+    const RUN_EVERY: usize = 1;
+
+    fn wakeup(
+        &mut self,
+        world: &mut World, 
+        resources: &mut Resources
+    );
+}
+
+impl Timer for T 
+where
+    T: Pass + 'static,
+{
+    fn wakeup(
+        self: Box<Self>, 
+        schedule: &mut TimingWheelHierarchy,
+        world: &mut World, 
+        resources: &mut Resources
+    ) {
+        let mut timer = *self;
+        <Self as Pass>::wakeup(&mut timer, world, resources);
+        app.schedule(Self::RUN_EVERY - 1, timer);
+    }
+}
+#+end_src
+
+* Case Study Part Two: Grenades with Timers 
+
+Now let us consider implementing grenades with this new timer system. Now, grenades are no longer an resource and 
+thus may be created and inspected independently. Additionally, their time is expressed in game ticks instead of 
+real-time units.
+
+#+begin_src rust
+struct Grenade {
+    entity: Entity,
+}
+
+impl Timer for Grenade {
+    fn wakeup(
+        self: Box<Self>, 
+        _: &mut TimingWheelHierarchy, 
+        world: &mut World,
+        _: &mut Resources
+    ) {
+        let Grenade { entity } = *self;
+        // Despawn the entity and perform whatever other action is required. 
+        world.despawn(entity);
+        // Timer is automatically destroyed here.
+    }
+}
+#+end_src
+
+* Supplementing Bevy Stages with Timers
+
+Although we can replace stages outright with timers, it would be just as useful to supplement stages
+with timers. This can be done by making the TimingWheelHierarchy a resource.
+
+#+begin_src rust
+
+#+end_src 
