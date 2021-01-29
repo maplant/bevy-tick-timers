@@ -5,6 +5,7 @@ authors = ["Matthew Plant <map@maplant.com>"]
 edition = "2018"
 license = "MIT/Apache-2.0"
 
+description = "Tick based timers for Bevy."
 documentation = "https://docs.rs/crate/bevy_tick_timers"
 homepage = "https://github.com/maplant/bevy-tick-timers"
 repository = "https://github.com/maplant/bevy-tick-timers"
