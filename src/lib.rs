@@ -38,7 +38,7 @@ const MAX_INTERVAL: usize = 64;
 
 struct TimingWheel {
     current_tick: usize,
-    ring:         [Vec<Box<dyn Stage>>; MAX_INTERVAL],
+    ring:         [Vec<(usize, Box<dyn Stage>)>; MAX_INTERVAL],
 }
 
 impl Default for TimingWheel {
@@ -59,14 +59,14 @@ impl Default for TimingWheel {
 
 impl TimingWheel {
     /// Insert the timer into the wheel. 
-    fn schedule(&mut self, ticks: usize, timer: Box<dyn Stage>) {
-        let index = (self.current_tick + ticks) % MAX_INTERVAL;
-        self.ring[index].push(timer);
+    fn schedule(&mut self, offset: usize, ticks: usize, timer: Box<dyn Stage>) {
+        let index = (self.current_tick + offset) % MAX_INTERVAL;
+        self.ring[index].push((ticks, timer));
     }
 
     /// Return all the timers that execute on the current tick, and more the clock
     /// forward one. 
-    fn tick(&mut self) -> Vec<Box<dyn Stage>> {
+    fn tick(&mut self) -> Vec<(usize, Box<dyn Stage>)> {
         let timers = mem::take(&mut self.ring[self.current_tick]);
         self.current_tick = (self.current_tick + 1) % MAX_INTERVAL;
         timers
@@ -97,10 +97,10 @@ impl Timers {
             (63 - after.leading_zeros()) / 6
         };
         match level {
-            0 => self.level_0.schedule(after, timer),
-            1 => self.level_1.schedule(after >> 6, timer),
-            2 => self.level_2.schedule(after >> 12, timer),
-            3 => self.level_3.schedule(after >> 18, timer),
+            0 => self.level_0.schedule(after, after, timer),
+            1 => self.level_1.schedule(after >> 6 - 1, after, timer),
+            2 => self.level_2.schedule(after >> 12 - 1, after, timer),
+            3 => self.level_3.schedule(after >> 18 - 1, after, timer),
             _ => panic!("timer interval too long"),
         }
     }
@@ -115,18 +115,22 @@ impl Timers {
 
     fn tick(&mut self) -> Vec<Box<dyn Stage>> {
         // Surely there is a better way to do this.
-        let mut timers = Vec::<Box<dyn Stage>>::new();
         if self.level_0.current_tick == 63 {
             if self.level_1.current_tick == 63 {
                 if self.level_2.current_tick == 63 {
-                    timers.extend(self.level_3.tick());
+                    for (tick, item) in self.level_3.tick() {
+                        self.level_2.schedule(tick, tick, item);
+                    }
                 }
-                timers.extend(self.level_2.tick());
+                for (tick, item) in self.level_2.tick() {
+                    self.level_1.schedule(tick, tick, item);
+                }
             }
-            timers.extend(self.level_1.tick());
+            for (tick, item) in self.level_1.tick() {
+                self.level_0.schedule(tick, tick, item);
+            }
         }
-        timers.extend(self.level_0.tick());
-        timers
+        self.level_0.tick().into_iter().map(|(_, x)| x).collect()
     }
 }
 
