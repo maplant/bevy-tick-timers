@@ -119,15 +119,15 @@ impl Timers {
             if self.level_1.current_tick == 63 {
                 if self.level_2.current_tick == 63 {
                     for (tick, item) in self.level_3.tick() {
-                        self.level_2.schedule(tick, tick, item);
+                        self.level_2.schedule(tick + 1, tick, item);
                     }
                 }
                 for (tick, item) in self.level_2.tick() {
-                    self.level_1.schedule(tick, tick, item);
+                    self.level_1.schedule(tick + 1, tick, item);
                 }
             }
             for (tick, item) in self.level_1.tick() {
-                self.level_0.schedule(tick, tick, item);
+                self.level_0.schedule(tick + 1, tick, item);
             }
         }
         self.level_0.tick().into_iter().map(|(_, x)| x).collect()
