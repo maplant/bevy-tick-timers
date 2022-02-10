@@ -1,8 +1,8 @@
 [package]
 name = "bevy-tick-timers"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Matthew Plant <map@maplant.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT/Apache-2.0"
 
 description = "Tick based timers for Bevy."
@@ -13,4 +13,4 @@ readme = "README.md"
 keywords = [ "bevy", "game", "engine", "gamedev" ]
 
 [dependencies]
-bevy = "0.4"
+bevy = "0.6"

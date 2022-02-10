@@ -29,22 +29,24 @@
 //!        .run();
 //!}
 //!```
-use bevy::ecs::Stage;
+// use bevy::ecs::Stage;
 use bevy::prelude::*;
 use std::mem::MaybeUninit;
 use std::mem;
 
 const MAX_INTERVAL: usize = 64;
 
+type BoxedSystem = Box<dyn System<In = (), Out = ()>>;
+
 struct TimingWheel {
     current_tick: usize,
-    ring:         [Vec<(usize, Box<dyn Stage>)>; MAX_INTERVAL],
+    ring:         [Vec<(usize, BoxedSystem)>; MAX_INTERVAL],
 }
 
 impl Default for TimingWheel {
     fn default() -> Self {
         let mut empty = MaybeUninit::<[Vec<_>; MAX_INTERVAL]>::uninit();
-        let p: *mut Vec<Box<dyn Stage>> = unsafe { mem::transmute(&mut empty) };
+        let p: *mut Vec<BoxedSystem> = unsafe { mem::transmute(&mut empty) };
         for i in 0..MAX_INTERVAL {
             unsafe {
                 p.add(i).write(vec![]);
@@ -59,14 +61,14 @@ impl Default for TimingWheel {
 
 impl TimingWheel {
     /// Insert the timer into the wheel. 
-    fn schedule(&mut self, offset: usize, ticks: usize, timer: Box<dyn Stage>) {
+    fn schedule(&mut self, offset: usize, ticks: usize, timer: BoxedSystem) {
         let index = (self.current_tick + offset) % MAX_INTERVAL;
         self.ring[index].push((ticks, timer));
     }
 
     /// Return all the timers that execute on the current tick, and more the clock
     /// forward one. 
-    fn tick(&mut self) -> Vec<(usize, Box<dyn Stage>)> {
+    fn tick(&mut self) -> Vec<(usize, BoxedSystem)> {
         let timers = mem::take(&mut self.ring[self.current_tick]);
         self.current_tick = (self.current_tick + 1) % MAX_INTERVAL;
         timers
@@ -90,7 +92,7 @@ impl Timers {
     where
         S: System<In = (), Out = ()>
     {
-        let timer = Box::new(SystemStage::from(timer));
+        let timer = Box::new(timer);
         let level = if after == 0 {
             0
         } else {
@@ -113,7 +115,7 @@ impl Timers {
         self.after(0, timer);
     }
 
-    fn tick(&mut self) -> Vec<Box<dyn Stage>> {
+    fn tick(&mut self) -> Vec<BoxedSystem> {
         // Surely there is a better way to do this.
         if self.level_0.current_tick == 63 {
             if self.level_1.current_tick == 63 {
@@ -135,23 +137,13 @@ impl Timers {
 }
 
 #[derive(Default)]
-struct RunTimers {
-    curr_timers: Vec<Box<dyn Stage>>,
-}
+struct RunTimers;
 
 impl Stage for RunTimers {
-    fn initialize(&mut self, world: &mut World, resources: &mut Resources) {
-        let mut timers = resources.get_mut::<Timers>().unwrap().tick();
-        for timer in &mut timers {
-            timer.initialize(world, resources);
-        }
-        self.curr_timers = timers;
-    }
-
-    fn run(&mut self, world: &mut World, resources: &mut Resources) {
-        let timers = mem::take(&mut self.curr_timers);
+    fn run(&mut self, world: &mut World) {
+        let timers = world.get_resource_mut::<Timers>().unwrap().tick();
         for mut timer in timers {
-            timer.run(world, resources);
+            timer.run((), world);
         }
     }
 }
@@ -161,8 +153,8 @@ impl Stage for RunTimers {
 pub struct TimerPlugin;
 
 impl Plugin for TimerPlugin {
-    fn build(&self, app: &mut AppBuilder) {
-        app.add_resource(Timers::default())
-            .add_stage("run timers", RunTimers::default());
+    fn build(&self, app: &mut App) {
+        app.world.insert_resource(Timers::default());
+        app.add_stage("run_timers", RunTimers);
     }
 }
