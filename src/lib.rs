@@ -14,10 +14,10 @@
 //!fn add_timer(
 //!    mut timers: ResMut<Timers>,
 //!) {
-//!    // Timers are Bevy systems, and thus can be closures. 
-//!    timers.after(5, (move || {
+//!    // Timers are closures that take the world as a mutable reference.
+//!    timers.after(5, |_| {
 //!        println!("timer has gone off!");
-//!    }).system());
+//!    });
 //!}
 //!
 //!fn main() {
@@ -36,7 +36,7 @@ use std::mem;
 
 const MAX_INTERVAL: usize = 64;
 
-type BoxedSystem = Box<dyn System<In = (), Out = ()>>;
+type BoxedSystem = Box<dyn FnOnce(&mut World) + Send + Sync>;
 
 struct TimingWheel {
     current_tick: usize,
@@ -90,7 +90,7 @@ impl Timers {
     /// Schedule a timer to occur after the given number of ticks have elapsed. 
     pub fn after<S>(&mut self, after: usize, timer: S)
     where
-        S: System<In = (), Out = ()>
+        S: FnOnce(&mut World) + Send + Sync + 'static,
     {
         let timer = Box::new(timer);
         let level = if after == 0 {
@@ -110,7 +110,7 @@ impl Timers {
     /// Schedule a timer to occur right now.
     pub fn now<S>(&mut self, timer: S)
     where
-        S: System<In = (), Out = ()>
+        S: FnOnce(&mut World) + Send + Sync + 'static,
     {
         self.after(0, timer);
     }
@@ -141,9 +141,9 @@ struct RunTimers;
 
 impl Stage for RunTimers {
     fn run(&mut self, world: &mut World) {
-        let timers = world.get_resource_mut::<Timers>().unwrap().tick();
-        for mut timer in timers {
-            timer.run((), world);
+        let timers = world.get_resource_mut::<Timers>().expect("Failed").tick();
+        for timer in timers {
+            timer(world);
         }
     }
 }

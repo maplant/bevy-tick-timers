@@ -5,9 +5,12 @@ fn add_timer(
     mut timers: ResMut<Timers>,
 ) {
     // Timers are Bevy systems, and thus can be closures. 
-    timers.after(129, (move || {
-        println!("timer has gone off!");
-    }).system());
+    timers.after(129, test);
+    println!("System scheduled");
+}
+
+fn test(_world: &mut World) {
+    println!("Timer has gone off");
 }
     
 fn main() {
