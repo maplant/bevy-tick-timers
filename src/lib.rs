@@ -78,7 +78,7 @@ impl TimingWheel {
 #[derive(Default)]
 pub struct Timers {
     /// One frame at 120 fps.
-    level: [TimingWheel<C, 64>; 4],
+    level: [TimingWheel; 4],
     // TODO: Add more levels (if you want to).
 }
 
@@ -88,7 +88,7 @@ impl Timers {
     where
         S: FnOnce(&mut World) + Send + Sync + 'static,
     {
-        let ticks = ticks
+        let ticks = after
             + self.level[0].current_tick
             + (self.level[1].current_tick << 6)
             + (self.level[2].current_tick << 12)
@@ -99,10 +99,14 @@ impl Timers {
             (63 - ticks.leading_zeros()) / 6
         };
         match level {
-            0 => self.level[0].schedule(ticks, 0, timer),
-            1 => self.level[1].schedule((ticks >> 6) - 1, ticks & 0b111111, timer),
-            2 => self.level[2].schedule((ticks >> 12) - 1, ticks & 0b111111111111, timer),
-            3 => self.level[3].schedule((ticks >> 18) - 1, ticks & 0b111111111111111111, timer),
+            0 => self.level[0].schedule(ticks, 0, Box::new(timer)),
+            1 => self.level[1].schedule((ticks >> 6) - 1, ticks & 0b111111, Box::new(timer)),
+            2 => self.level[2].schedule((ticks >> 12) - 1, ticks & 0b111111111111, Box::new(timer)),
+            3 => self.level[3].schedule(
+                (ticks >> 18) - 1,
+                ticks & 0b111111111111111111,
+                Box::new(timer),
+            ),
             _ => panic!("timer interval too long"),
         }
     }
